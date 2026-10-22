@@ -19,6 +19,7 @@ from jwt.exceptions import (
     InvalidAlgorithmError,
     PyJWKClientConnectionError,
     PyJWKClientError,
+    PyJWKSetError,
 )
 from jwt.jwks_client import _NoRedirectHandler
 from jwt.utils import base64url_encode
@@ -424,6 +425,38 @@ class TestPyJWKClient:
             "azp": "aW4Cca79xReLWUz0aE2H6kD0O3cXBVtC",
             "gty": "client-credentials",
         }
+
+    def test_get_signing_key_from_jwt_rejects_empty_hmac_jwk(self):
+        # GHSA-pxh4-856f-4h89: a JWKS that publishes an oct key with an empty
+        # "k" (e.g. the issuer's signing secret is unset) must not yield a
+        # usable signing key, otherwise anyone can forge HS256 tokens signed
+        # with an empty HMAC key and have them verify.
+        import hashlib
+        import hmac
+
+        header = {"alg": "HS256", "typ": "JWT", "kid": "active"}
+        signing_input = b".".join(
+            [
+                base64url_encode(json.dumps(header, separators=(",", ":")).encode()),
+                base64url_encode(json.dumps({"sub": "attacker"}).encode()),
+            ]
+        )
+        signature = hmac.new(b"", signing_input, hashlib.sha256).digest()
+        token = b".".join([signing_input, base64url_encode(signature)]).decode()
+
+        empty_hmac_jwk = {
+            "kty": "oct",
+            "k": "",
+            "kid": "active",
+            "alg": "HS256",
+            "use": "sig",
+        }
+
+        url = "https://example.test/.well-known/jwks.json"
+        jwks_client = PyJWKClient(url)
+        with mocked_success_response({"keys": [empty_hmac_jwk]}):
+            with pytest.raises(PyJWKSetError, match="did not contain any usable keys"):
+                jwks_client.get_signing_key_from_jwt(token)
 
     def test_get_signing_key_from_jwt_rejects_deeply_nested_payload(self):
         nested_payload = b"[" * 100_000 + b"]" * 100_000

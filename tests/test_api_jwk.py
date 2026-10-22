@@ -355,6 +355,19 @@ class TestPyJWKSet:
         with pytest.raises(InvalidKeyError):
             PyJWK({"kty": "RSA", "alg": "RS256", "n": 1, "e": "AQAB"})
 
+    def test_keyset_skips_oct_key_with_empty_k(self):
+        # An oct JWK with an empty "k" would let anyone forge HS* tokens
+        # signed with an empty HMAC key, so it must be treated as unusable.
+        empty_key = {"kty": "oct", "k": "", "kid": "empty", "alg": "HS256"}
+        valid_key = {"kty": "oct", "k": "c2VjcmV0", "kid": "valid", "alg": "HS256"}
+
+        keyset = PyJWKSet.from_dict({"keys": [empty_key, valid_key]})
+
+        assert [key.key_id for key in keyset.keys] == ["valid"]
+
+        with pytest.raises(PyJWKSetError, match="did not contain any usable keys"):
+            PyJWKSet.from_dict({"keys": [empty_key]})
+
     @crypto_required
     def test_keyset_with_unknown_alg(self):
         # first keyset with unusable key and usable key

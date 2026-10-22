@@ -1220,3 +1220,11 @@ class TestJWS:
 
         with pytest.raises(InvalidTokenError, match="Unsupported critical extension"):
             jws.get_unverified_header(token)
+
+    def test_pyjwk_rejects_empty_hmac_key(self):
+        import jwt
+
+        with pytest.raises(jwt.InvalidKeyError, match="must not be empty"):
+            jwt.PyJWK.from_dict(
+                {"kty": "oct", "k": "", "kid": "active", "alg": "HS256"}
+            )
